@@ -216,7 +216,7 @@ with col_chart:
             height=320,
             showlegend=False,
         )
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, config={"responsive": True})
 
 with col_pct:
     st.markdown(f"#### {chart_coin} — % changes")
@@ -242,7 +242,7 @@ with col_pct:
             height=320,
             showlegend=False,
         )
-        st.plotly_chart(fig2, width="stretch")
+        st.plotly_chart(fig2, config={"responsive": True})
 
 st.markdown("---")
 
