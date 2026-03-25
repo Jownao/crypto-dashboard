@@ -1,3 +1,4 @@
+import logging
 from requests import Session
 from requests.exceptions import ConnectionError, Timeout, TooManyRedirects
 from dotenv import load_dotenv
@@ -7,6 +8,19 @@ import os
 import time
 import psycopg2
 
+# ========================
+# CONFIG LOGGING
+# ========================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+
+logger = logging.getLogger(__name__)
+
+# ========================
+# LOAD ENV
+# ========================
 load_dotenv()
 
 URL = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest"
@@ -41,8 +55,11 @@ def get_connection():
 
 def create_table():
     try:
+        logger.info("Creating table if not exists...")
+
         conn = get_connection()
         cursor = conn.cursor()
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS crypto_quotes (
                 id           SERIAL PRIMARY KEY,
@@ -59,21 +76,26 @@ def create_table():
                 collected_at TIMESTAMP DEFAULT NOW()
             );
         """)
+
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_crypto_symbol_time
             ON crypto_quotes (symbol, collected_at DESC);
         """)
+
         conn.commit()
         cursor.close()
         conn.close()
-        print("Table ready.")
+
+        logger.info("Table ready.")
+
     except Exception as e:
-        print(f"Error creating table: {e}")
+        logger.error(f"Error creating table: {e}")
 
 
 def save_coins(coins):
-    """Insert all coins in a single batch (executemany)."""
     try:
+        logger.info(f"Saving {len(coins)} coins...")
+
         conn = get_connection()
         cursor = conn.cursor()
 
@@ -102,38 +124,48 @@ def save_coins(coins):
 
         cursor.executemany(query, rows)
         conn.commit()
+
         cursor.close()
         conn.close()
-        print(f"{len(rows)} coins saved.")
+
+        logger.info(f"{len(rows)} coins saved successfully.")
+
     except Exception as e:
-        print(f"Error saving coins: {e}")
+        logger.error(f"Error saving coins: {e}")
 
 
 def fetch_and_store():
     try:
+        logger.info("Fetching data from CoinMarketCap...")
+
         response = session.get(URL, params=PARAMS)
+        logger.info(f"Status code: {response.status_code}")
+
         data = json.loads(response.text)
 
         if data.get("status", {}).get("error_code") != 0:
-            print("API error:", data["status"].get("error_message"))
+            logger.error(f"API error: {data['status'].get('error_message')}")
             return
 
         if "data" in data:
             save_coins(data["data"])
         else:
-            print("Unexpected response:", data)
+            logger.error(f"Unexpected response: {data}")
 
     except (ConnectionError, Timeout, TooManyRedirects) as e:
-        print(f"Request error: {e}")
+        logger.error(f"Request error: {e}")
 
-
-# Run once immediately, then every 5 minutes
-create_table()
-fetch_and_store()
-schedule.every(5).minutes.do(fetch_and_store)
 
 if __name__ == "__main__":
-    print("Collecting top 100 coins every 5 minutes...")
+    logger.info("Starting crypto collector...")
+
+    create_table()
+    fetch_and_store()
+
+    schedule.every(5).minutes.do(fetch_and_store)
+
+    logger.info("Collector running every 5 minutes...")
+
     while True:
         schedule.run_pending()
         time.sleep(1)

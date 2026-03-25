@@ -1,6 +1,6 @@
 # Environment variables — never commit the real .env
 .env
-
+sample_data.csv
 # Python
 __pycache__/
 *.py[cod]
