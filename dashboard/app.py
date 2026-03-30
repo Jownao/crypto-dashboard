@@ -81,13 +81,15 @@ def load_latest_snapshot() -> pd.DataFrame:
             FROM crypto_quotes
             ORDER BY symbol, collected_at DESC;
         """
-        df = pd.read_sql(query, get_connection())
+        conn = get_connection()
+        df = pd.read_sql(query, conn)
+        conn.close()
     else:
         df = load_csv()
         df = (df.sort_values("collected_at", ascending=False)
                 .drop_duplicates("symbol"))
     return df.sort_values("cmc_rank")
-
+ 
 @st.cache_data(ttl=60)
 def load_price_history(symbol: str, hours: int = 24) -> pd.DataFrame:
     if USE_RDS:
@@ -98,7 +100,10 @@ def load_price_history(symbol: str, hours: int = 24) -> pd.DataFrame:
               AND collected_at >= NOW() - INTERVAL '%s hours'
             ORDER BY collected_at ASC;
         """
-        return pd.read_sql(query, get_connection(), params=(symbol, hours))
+        conn = get_connection()
+        df = pd.read_sql(query, conn, params=(symbol, hours))
+        conn.close()
+        return df
     else:
         df     = load_csv()
         cutoff = df["collected_at"].max() - timedelta(hours=hours)
