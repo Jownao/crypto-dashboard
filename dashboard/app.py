@@ -57,7 +57,6 @@ CSV_PATH = Path(__file__).parent.parent / "sample_data.csv"
 USE_RDS  = bool(os.getenv("DB_HOST"))
 MODE     = "RDS" if USE_RDS else "CSV (local preview)"
 
-
 def get_connection():
     """Always creates a fresh connection — avoids stale/closed connection errors."""
     return psycopg2.connect(
@@ -90,26 +89,60 @@ def load_latest_snapshot() -> pd.DataFrame:
         df = (df.sort_values("collected_at", ascending=False)
                 .drop_duplicates("symbol"))
     return df.sort_values("cmc_rank")
- 
+
 @st.cache_data(ttl=60)
 def load_price_history(symbol: str, hours: int = 24) -> pd.DataFrame:
+    # Bucket size keeps the chart responsive regardless of period
+    if hours == 0 or hours >= 720:
+        bucket = "1 hour"
+    elif hours >= 168:
+        bucket = "30 minutes"
+    elif hours >= 24:
+        bucket = "15 minutes"
+    else:
+        bucket = "5 minutes"
+
     if USE_RDS:
-        query = """
-            SELECT collected_at, price, volume_24h
-            FROM crypto_quotes
-            WHERE symbol = %s
-              AND collected_at >= NOW() - INTERVAL '%s hours'
-            ORDER BY collected_at ASC;
-        """
+        if hours == 0:
+            query = f"""
+                SELECT
+                    date_trunc('{bucket}', collected_at) AS collected_at,
+                    AVG(price)      AS price,
+                    AVG(volume_24h) AS volume_24h
+                FROM crypto_quotes
+                WHERE symbol = %s
+                GROUP BY 1
+                ORDER BY 1 ASC;
+            """
+            params = (symbol,)
+        else:
+            query = f"""
+                SELECT
+                    date_trunc('{bucket}', collected_at) AS collected_at,
+                    AVG(price)      AS price,
+                    AVG(volume_24h) AS volume_24h
+                FROM crypto_quotes
+                WHERE symbol = %s
+                  AND collected_at >= NOW() - ({hours} * INTERVAL '1 hour')
+                GROUP BY 1
+                ORDER BY 1 ASC;
+            """
+            params = (symbol,)
         conn = get_connection()
-        df = pd.read_sql(query, conn, params=(symbol, hours))
+        df = pd.read_sql(query, conn, params=params)
         conn.close()
         return df
     else:
-        df     = load_csv()
-        cutoff = df["collected_at"].max() - timedelta(hours=hours)
-        df     = df[(df["symbol"] == symbol) & (df["collected_at"] >= cutoff)]
-        return df[["collected_at", "price", "volume_24h"]].sort_values("collected_at")
+        df = load_csv()
+        if hours > 0:
+            cutoff = df["collected_at"].max() - timedelta(hours=hours)
+            df = df[(df["symbol"] == symbol) & (df["collected_at"] >= cutoff)]
+        else:
+            df = df[df["symbol"] == symbol]
+        df = df[["collected_at", "price", "volume_24h"]].sort_values("collected_at")
+        freq = "h" if "hour" in bucket else "30min" if "30" in bucket else "15min" if "15" in bucket else "5min"
+        df["collected_at"] = df["collected_at"].dt.floor(freq)
+        return df.groupby("collected_at")[["price", "volume_24h"]].mean().reset_index()
 
 # ── Helpers ─────────────────────────────────────────────────────────────────────
 DEFAULT_COINS = ["BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "AVAX", "DOT", "MATIC"]
@@ -161,7 +194,7 @@ with st.sidebar:
     default_selection = [s for s in DEFAULT_COINS if s in all_symbols]
     selected = st.multiselect("Choose coins", options=all_symbols, default=default_selection)
     st.markdown("---")
-    period_map   = {"1 hour": 1, "6 hours": 6, "24 hours": 24, "7 days": 168}
+    period_map   = {"1 hour": 1, "6 hours": 6, "24 hours": 24, "7 days": 168, "30 days": 720, "All time": 0}
     period_label = st.selectbox("Chart period", list(period_map.keys()), index=2)
     chart_hours  = period_map[period_label]
     st.markdown("---")
@@ -202,12 +235,16 @@ with col_chart:
         st.info(f"Not enough history yet for {chart_coin}.")
     else:
         fig = go.Figure()
+        y_min = history["price"].min()
+        y_max = history["price"].max()
+        y_pad = (y_max - y_min) * 0.1 or y_min * 0.01
+
         fig.add_trace(go.Scatter(
             x=history["collected_at"],
             y=history["price"],
             mode="lines",
             line=dict(color="#f7931a", width=2),
-            fill="tozeroy",
+            fill="toself",
             fillcolor="rgba(247,147,26,0.07)",
             name="Price",
             hovertemplate="<b>%{y:,.4f}</b> USD<br>%{x}<extra></extra>",
@@ -218,7 +255,11 @@ with col_chart:
             plot_bgcolor="rgba(0,0,0,0)",
             margin=dict(l=0, r=0, t=10, b=0),
             xaxis=dict(showgrid=False),
-            yaxis=dict(showgrid=True, gridcolor="#1e1e1e"),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor="#1e1e1e",
+                range=[y_min - y_pad, y_max + y_pad],
+            ),
             height=320,
             showlegend=False,
         )
