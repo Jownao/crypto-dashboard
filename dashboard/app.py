@@ -57,8 +57,9 @@ CSV_PATH = Path(__file__).parent.parent / "sample_data.csv"
 USE_RDS  = bool(os.getenv("DB_HOST"))
 MODE     = "RDS" if USE_RDS else "CSV (local preview)"
 
-@st.cache_resource
+
 def get_connection():
+    """Always creates a fresh connection — avoids stale/closed connection errors."""
     return psycopg2.connect(
         host=os.getenv("DB_HOST"),
         database=os.getenv("DB_NAME"),
