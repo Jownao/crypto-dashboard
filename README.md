@@ -2,6 +2,14 @@
 
 I built a real-time cryptocurrency price tracker that collects data from the CoinMarketCap API every 5 minutes, stores it in a PostgreSQL database on AWS RDS, and displays it through a Streamlit dashboard — all running 24/7 on AWS Free Tier. Here's how I thought through it and built it.
 
+- Website
+
+![image2](assets/2.png)
+
+- Project Architecture
+
+![image1](assets/1.png)
+
 ---
 
 ## The idea
