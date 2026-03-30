@@ -92,44 +92,24 @@ def load_latest_snapshot() -> pd.DataFrame:
 
 @st.cache_data(ttl=60)
 def load_price_history(symbol: str, hours: int = 24) -> pd.DataFrame:
-    # Bucket size keeps the chart responsive regardless of period
-    if hours == 0 or hours >= 720:
-        bucket = "1 hour"
-    elif hours >= 168:
-        bucket = "30 minutes"
-    elif hours >= 24:
-        bucket = "15 minutes"
-    else:
-        bucket = "5 minutes"
-
     if USE_RDS:
         if hours == 0:
-            query = f"""
-                SELECT
-                    date_trunc('{bucket}', collected_at) AS collected_at,
-                    AVG(price)      AS price,
-                    AVG(volume_24h) AS volume_24h
+            query = """
+                SELECT collected_at, price, volume_24h
                 FROM crypto_quotes
                 WHERE symbol = %s
-                GROUP BY 1
-                ORDER BY 1 ASC;
+                ORDER BY collected_at ASC;
             """
-            params = (symbol,)
         else:
             query = f"""
-                SELECT
-                    date_trunc('{bucket}', collected_at) AS collected_at,
-                    AVG(price)      AS price,
-                    AVG(volume_24h) AS volume_24h
+                SELECT collected_at, price, volume_24h
                 FROM crypto_quotes
                 WHERE symbol = %s
                   AND collected_at >= NOW() - ({hours} * INTERVAL '1 hour')
-                GROUP BY 1
-                ORDER BY 1 ASC;
+                ORDER BY collected_at ASC;
             """
-            params = (symbol,)
         conn = get_connection()
-        df = pd.read_sql(query, conn, params=params)
+        df = pd.read_sql(query, conn, params=(symbol,))
         conn.close()
         return df
     else:
@@ -139,10 +119,7 @@ def load_price_history(symbol: str, hours: int = 24) -> pd.DataFrame:
             df = df[(df["symbol"] == symbol) & (df["collected_at"] >= cutoff)]
         else:
             df = df[df["symbol"] == symbol]
-        df = df[["collected_at", "price", "volume_24h"]].sort_values("collected_at")
-        freq = "h" if "hour" in bucket else "30min" if "30" in bucket else "15min" if "15" in bucket else "5min"
-        df["collected_at"] = df["collected_at"].dt.floor(freq)
-        return df.groupby("collected_at")[["price", "volume_24h"]].mean().reset_index()
+        return df[["collected_at", "price", "volume_24h"]].sort_values("collected_at")
 
 # ── Helpers ─────────────────────────────────────────────────────────────────────
 DEFAULT_COINS = ["BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "AVAX", "DOT", "MATIC"]
